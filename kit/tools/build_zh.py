@@ -23,7 +23,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 def main(argv):
     if len(argv) != 3:
-        sys.stderr.write('usage: tools/build_zh.py <app-id> <version>\n')
+        sys.stderr.write('usage: kit/tools/build_zh.py <app-id> <version>\n')
         return 2
     app_id, version = argv[1], argv[2]
 
