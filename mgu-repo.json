@@ -5,8 +5,8 @@
     "manifest": "app.json",
     "icon": "icon.png",
     "build": {
-      "python": "kit/tools/build.py",
-      "args": ["{id}"],
+      "python": "kit/tools/build_zh.py",
+      "args": ["{id}", "{version}"],
       "sdk": "oap-sdk",
       "output": "dist/{id}@{version}.tgz",
       "network": ["doom"],
