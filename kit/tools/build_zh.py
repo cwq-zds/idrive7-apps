@@ -1,24 +1,42 @@
 #!/usr/bin/env python
-"""Build one app in Simplified Chinese, under the name the MGU Store expects.
+"""Build one app in Simplified Chinese, with a version the Store and the
+deploy tool accept.
 
-Why this exists: mgu-repo.json's `output` template is filled with the app's
-*unlocalized* version from app.json, while `build.py --language zh-CN` writes
-the *localized* one (`<version>-zh.cn.<revision>.tgz`). The Store then looks for
-`dist/<id>@<version>.tgz`, does not find it, and the build fails. This runs the
-real build and leaves a copy under the name the Store looks for.
+Why this exists: `build.py --language zh-CN` writes the localized version
+(`<version>-zh.cn.<revision>`) into the package's package.json and its
+rhmiData/application.json. Both the MGU Store and mgu-deploy require a strict
+x.y.z version and refuse anything else:
+
+    package.json needs a lower-case name and an x.y.z version   (the Store)
+    version is not x.y.z: 2.0.45-zh.cn.2                        (mgu-deploy)
+
+So this runs the real build with package_version overridden to keep the plain
+version. The localized texts, the string tables and the translation credit are
+untouched: only the version string is kept. dist/<id>@<version>.tgz is then
+exactly the file mgu-repo.json's `output` names, so no renaming is needed.
 
     python kit/tools/build_zh.py <app-id> <version>
 
-Called by the MGU Store as `kit/tools/build_zh.py {id} {version}`; the version
-comes from app.json and is what mgu-repo.json's `output` is filled with.
+Called by the MGU Store as `kit/tools/build_zh.py {id} {version}`.
 """
-import glob
+import json
 import os
-import shutil
-import subprocess
 import sys
+import tarfile
 
-ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+sys.path.insert(0, os.path.join(ROOT, 'kit', 'tools'))
+
+import localize  # noqa: E402  (after sys.path)
+
+
+def built_version(package):
+    """The version the Store and mgu-deploy read: package/package.json."""
+    with tarfile.open(package, 'r:gz') as tf:
+        member = tf.extractfile('package/package.json')
+        if member is None:
+            raise SystemExit('build_zh: %s has no package/package.json' % package)
+        return json.loads(member.read().decode('utf-8')).get('version')
 
 
 def main(argv):
@@ -27,26 +45,29 @@ def main(argv):
         return 2
     app_id, version = argv[1], argv[2]
 
-    build = os.path.join(ROOT, 'kit', 'tools', 'build.py')
-    rc = subprocess.call([sys.executable, build, app_id, '--language', 'zh-CN'], cwd=ROOT)
-    if rc != 0:
-        sys.stderr.write('build_zh: build.py exited %d for %s\n' % (rc, app_id))
-        return rc
+    # Keep x.y.z: both the Store and mgu-deploy refuse a localized suffix.
+    localize.package_version = lambda v, language: v
 
-    dist = os.path.join(ROOT, 'dist')
-    want = os.path.join(dist, '%s@%s.tgz' % (app_id, version))
-    if os.path.isfile(want):
-        print('build_zh: %s already at the expected name' % os.path.basename(want))
-        return 0
+    import build  # noqa: E402  (its localize_spec reads the patched function)
 
-    found = [p for p in glob.glob(os.path.join(dist, '%s@*.tgz' % app_id)) if os.path.isfile(p)]
-    if not found:
-        sys.stderr.write('build_zh: build.py left no .tgz for %s in dist/\n' % app_id)
+    try:
+        build.build(app_id, 'zh-CN')
+    except SystemExit as e:
+        sys.stderr.write('build_zh: %s\n' % e)
         return 1
 
-    src = max(found, key=os.path.getmtime)
-    shutil.copyfile(src, want)
-    print('build_zh: %s -> %s' % (os.path.basename(src), os.path.basename(want)))
+    package = os.path.join(ROOT, 'dist', '%s@%s.tgz' % (app_id, version))
+    if not os.path.isfile(package):
+        sys.stderr.write('build_zh: build.py left no %s\n' % os.path.relpath(package, ROOT))
+        return 1
+
+    got = built_version(package)
+    if got != version:
+        sys.stderr.write('build_zh: %s carries version %s, the Store expects %s\n'
+                         % (os.path.relpath(package, ROOT), got, version))
+        return 1
+
+    print('build_zh: %s %s (zh-CN)' % (app_id, version))
     return 0
 
 
